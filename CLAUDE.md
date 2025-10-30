@@ -20,7 +20,7 @@ source .venv/bin/activate  # On macOS/Linux
 ### Running the Application
 ```bash
 # Run the FastAPI development server
-uvicorn rag.app:app --reload
+uvicorn rag.app.main:app --reload
 
 # Or use the CLI entry point
 rag
@@ -32,13 +32,10 @@ rag
 pytest
 
 # Run a specific test file
-pytest tests/test_llm.py
+pytest tests/test_app.py
 
 # Run with verbose output
 pytest -v
-
-# Run a specific test function
-pytest tests/test_llm.py::test_function_name
 ```
 
 ### Dependency Management
@@ -55,38 +52,110 @@ uv sync
 
 ## Architecture
 
-### Application Structure
+This project implements **Hexagonal Architecture (Ports & Adapters)** with clear separation between business logic, infrastructure, and application layers.
 
-The application follows a layered architecture:
+### Directory Structure
 
-1. **Web Layer** (`app.py`): FastAPI application that serves both the web UI and REST API
-   - GET `/`: Returns HTML chatbot interface
-   - POST `/api/message`: Accepts user queries and returns AI responses
+```
+src/rag/
+├── core/          # Business logic (domain layer)
+│   ├── ports.py      # Protocol interfaces defining contracts
+│   └── services.py   # Core RAG orchestration logic
+├── adapters/      # Infrastructure implementations
+│   ├── db.py                # Vector database adapters (EmptyDB stub)
+│   └── language_models.py   # LLM adapters (Parrot stub)
+└── app/           # FastAPI web layer
+    ├── main.py          # FastAPI app and routes
+    ├── models.py        # Pydantic request/response models
+    ├── dependencies.py  # Dependency injection configuration
+    └── templates/       # HTML templates
+```
 
-2. **LLM Layer** (`llm.py`): Handles interactions with AWS Bedrock
-   - `get_embedding(query)`: Generates embeddings for semantic search
-   - `call(query, documents, prompt)`: Invokes LLM with RAG context
+### Hexagonal Architecture Layers
 
-3. **Database Layer** (`db.py`): Vector database for document storage and retrieval (placeholder)
+**Core (src/rag/core/):**
+- `ports.py` defines Protocol interfaces (VectorDatabase, LanguageModel, MessageService)
+- `services.py` contains MessageService which orchestrates the RAG workflow:
+  1. Get embedding of user message
+  2. Search for similar documents in vector store
+  3. Retrieve documents corresponding to similar embeddings
+  4. Pass message + context to LLM for generation
+- Core has ZERO dependencies on external frameworks or AWS
 
-4. **Models Layer** (`models.py`): Pydantic models for request/response validation
-   - `Query`: Request model with `text` field
+**Adapters (src/rag/adapters/):**
+- Implement the port interfaces from core
+- Current implementations are stubs for development:
+  - `EmptyDB`: Returns empty embeddings (replace with Bedrock Knowledge Base)
+  - `Parrot`: Echoes input (replace with Bedrock Claude models)
+- Future AWS Bedrock integration happens here via boto3
 
-### Key Technical Details
+**Application (src/rag/app/):**
+- `main.py`: FastAPI routes (GET / for UI, POST /api/message for chat)
+- `dependencies.py`: Dependency injection that wires adapters to core services
+- `models.py`: Pydantic schemas for HTTP requests/responses
 
-- **Templates**: Uses Jinja2 templates stored in `src/rag/templates/`
-- **AWS Integration**: Configured to use boto3 for AWS Bedrock API calls
-- **Frontend**: Single-page chat interface with vanilla JavaScript (no framework)
+### Dependency Injection Pattern
 
-### Request Flow
+The app uses constructor-based dependency injection via FastAPI's `Depends`:
 
-1. User sends message via web interface
-2. Frontend POSTs to `/api/message` with JSON payload: `{"message": "user message"}`
-3. Backend receives Query model, processes with LLM layer
-4. Response returned as JSON: `{"response": "AI response"}`
+```python
+# Core service depends on port interfaces, not implementations
+@dataclass
+class MessageService:
+    vector_db: ports.VectorDatabase
+    language_model: ports.LanguageModel
 
-## Development Notes
+# FastAPI provides concrete implementations
+def get_message_service(
+    vector_db: Annotated[ports.VectorDatabase, Depends(get_database)],
+    language_model: Annotated[ports.LanguageModel, Depends(get_language_model)],
+) -> ports.MessageService:
+    return services.MessageService(vector_db=vector_db, language_model=language_model)
+```
 
-- The LLM functions in `llm.py` are currently stub implementations (ellipsis only)
-- The database layer (`db.py`) is a placeholder file
-- Test data is defined in `tests/test_llm.py` with sample documents about geography
+This design enables:
+- Easy swapping of implementations (stub → real AWS services)
+- Simple mocking for tests
+- Core logic remains independent of infrastructure
+
+### RAG Data Flow
+
+```
+User Message → FastAPI → MessageService → VectorDatabase.get_embedding()
+                                       → VectorDatabase.search_similar()
+                                       → VectorDatabase.inverse_embeddings()
+                                       → LanguageModel.answer(message, context)
+                                       → Response
+```
+
+### AWS Bedrock Integration Points
+
+Currently stubbed but designed for AWS Bedrock integration:
+
+1. **Vector Database (adapters/db.py):** Replace EmptyDB with Bedrock Knowledge Base or embeddings API
+2. **Language Model (adapters/language_models.py):** Replace Parrot with Bedrock Claude models via boto3
+3. AWS credentials: Use standard boto3 configuration (environment variables, ~/.aws/credentials, or IAM roles)
+
+### Testing Strategy
+
+- Tests use FastAPI's `TestClient` with dependency overrides
+- `app.dependency_overrides` injects stub implementations to avoid external calls
+- Run individual tests: `pytest tests/test_app.py -k test_name`
+- Tests demonstrate the dependency injection pattern in action
+
+### Key Design Principles
+
+- **Ports & Adapters:** Domain logic isolated from frameworks
+- **Protocol (Structural Typing):** Python 3.13 Protocol classes define contracts
+- **Dependency Injection:** Loose coupling between layers
+- **Repository Pattern:** VectorDatabase abstracts data persistence
+- **Service Layer:** MessageService orchestrates business logic
+
+### Extending the Application
+
+To add real AWS Bedrock integration:
+
+1. Create new adapter classes in `adapters/` that implement the port interfaces
+2. Update `dependencies.py` to return the new adapters instead of stubs
+3. Configure boto3 with AWS credentials
+4. Core business logic in `services.py` remains unchanged

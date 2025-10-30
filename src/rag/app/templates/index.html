@@ -78,7 +78,7 @@
             const res = await fetch("/api/message", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: userMessage })
+                body: JSON.stringify({ message: userMessage })
             });
 
             const data = await res.json();
