@@ -17,15 +17,15 @@ templates = Jinja2Templates(directory=str(templates_path))
 
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.post("/api/message")
 async def send_message(
     message: Message,
-    message_service: Annotated[ports.MessageService, Depends(deps.get_message_service)],
+    chat_service: Annotated[ports.ChatService, Depends(deps.get_chat_service)],
 ):
-    response = message_service.process(message.message)
+    response = await chat_service.answer(message.message)
     return JSONResponse({"response": response})
 
 

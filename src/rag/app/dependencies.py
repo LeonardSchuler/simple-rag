@@ -1,30 +1,34 @@
+import boto3
 from typing import Annotated
 from fastapi import Depends
 
 from ..core import services, ports
-from ..adapters import db, language_models
+from ..adapters import language_models, vector_dbs, embedders
 
 
-_database = db.EmptyDB()
-_language_model = language_models.Parrot()
+session = boto3.Session()
+_database = vector_dbs.EmptyDB()
+_language_model = language_models.BedrockClaudeLLM(session=session)
+_embedder = embedders.BedrockTitanEmbedder(session=session)
 
 
-def get_database() -> ports.VectorDatabase:
+async def get_embedder() -> ports.Embedder:
+    return _embedder
+
+
+async def get_database() -> ports.VectorDatabase:
     return _database
 
 
-def get_language_model():
+async def get_language_model():
     return _language_model
 
 
-# def get_embedder(
-#    database: Annotated[db.Database, Depends(get_database)],
-# ) -> services.EmbeddingService:
-#    return services.EmbeddingService(database=database)
-
-
-def get_message_service(
+async def get_chat_service(
+    embedder: Annotated[ports.Embedder, Depends(get_embedder)],
     vector_db: Annotated[ports.VectorDatabase, Depends(get_database)],
     language_model: Annotated[ports.LanguageModel, Depends(get_language_model)],
-) -> ports.MessageService:
-    return services.MessageService(vector_db=vector_db, language_model=language_model)
+) -> ports.ChatService:
+    return services.ChatService(
+        embedder=embedder, vector_db=vector_db, language_model=language_model
+    )
